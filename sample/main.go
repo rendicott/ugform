@@ -3,6 +3,9 @@ package main
 import (
 	"os"
 	"log"
+	"fmt"
+	"context"
+	"time"
 	"github.com/inconshreveable/log15"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rendicott/ugform"
@@ -74,6 +77,7 @@ func main() {
 
 	// create a new form 
 	sampleForm := ugform.NewForm(s)
+	sampleForm.Name = "SampleForm"
 	// add content to the form, there's a handy func for this for demo
 	err = ugform.AddSampleTextBoxes(sampleForm)
 	if err != nil {
@@ -81,6 +85,7 @@ func main() {
 	}
 	// now show how to create custom forms
 	customForm := ugform.NewForm(s)
+	customForm.Name = "CustomForm"
 	err = customForm.AddTextBox(
 		&ugform.AddTextBoxInput{
 			Name: "spaces are supported",
@@ -91,7 +96,7 @@ func main() {
 			Height: 2,
 			StyleCursor: ugform.StyleCursor("white"),
 			StyleFill: ugform.StyleFill("green"),
-			StyleText: ugform.StyleText("red"),
+			StyleText: ugform.StyleHelper("red", "green"),
 			StyleDescription: ugform.StyleHelper("orange", "gray"),
 			ShowDescription: true,
 		},
@@ -99,10 +104,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("%+v", err)
 	}
-	loggo.Info("starting forms")
+	// you can shift position of the box after creation
+	// by calling the ShiftXY method
+	sampleForm.ShiftXY(3,20)
 	// calling start will draw the boxes
+	loggo.Info("starting forms")
 	sampleForm.Start()
 	customForm.Start()
+	// set up optional context so you can regain control 
+	// of the form's blocking PollEvent
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// start a main even poller 
 	go func() {
 		for {
@@ -119,14 +131,32 @@ func main() {
 							// the form with the interrupt
 							// channel you want to wait for
 							formInterrupt := make(chan struct{})
-							go sampleForm.Poll(formInterrupt)
-							loggo.Info("pasuing main poll")
+							go sampleForm.Poll(ctx, formInterrupt)
+							loggo.Info("pausing main poll")
+
+							// if you want you can wrestle
+							// control back from form Poll
+							// by cancelling context
+							time.Sleep(5*time.Second)
+							cancel()
+							// otherwise wait for form
+							// to close the interrupt
 							<-formInterrupt
 							loggo.Info("resuming main poll")
+							// you'll have to reset the context
+							// if you want to keep using it
+							ctx, cancel = context.WithCancel(
+								context.Background())
+						// a different keystroke can activate
+						// a different form
 						case csr("k"):
 							formInterrupt := make(chan struct{})
-							go customForm.Poll(formInterrupt)
+							go customForm.Poll(ctx, formInterrupt)
 							<-formInterrupt
+						// have a keystroke that moves the form
+						// around
+						case csr("u"):
+							sampleForm.ClearShiftXY(0,-3)
 					}
 				// define a main poller exit routine
 				// but keep in mind this won't work
@@ -144,5 +174,16 @@ func main() {
 	<-quit
 	// clean up and close out screen
 	s.Fini()
+	// collect results from the forms as a map[string]string
+	// where key is the field name and value is the textbox
+	// contents
+	fmt.Println("Results from sampleForm:")
+	for k, v := range sampleForm.Collect() {
+		fmt.Printf("	%s: '%s'\n", k, v)
+	}
+	fmt.Println("Results from customForm:")
+	for k, v := range customForm.Collect() {
+		fmt.Printf("	%s: '%s'\n", k, v)
+	}
 	os.Exit(0)
 }
