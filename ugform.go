@@ -514,7 +514,7 @@ cede control over to the Form's polling loop and trust it to return
 control back to another polling loop. It takes an interrupt channel
 parameter which you should pass it and then have your main polling
 loop block waiting for the form's interrupt channel to close.*/
-func (f *Form) Poll(ctx context.Context, interrupt chan struct{}) {
+func (f *Form) Poll(ctx context.Context, interrupt chan struct{}, submit chan string) {
 	die := make(chan int)
 	go f.ctxWatcher(ctx, die)
 	log("Info", "starting form poll", "formName", f.Name)
@@ -536,6 +536,17 @@ func (f *Form) Poll(ctx context.Context, interrupt chan struct{}) {
 			case tcell.KeyBackspace, tcell.KeyBackspace2:
 				log("Debug", "detected backspace")
 				f.focus.back()
+			case tcell.KeyEnter:
+				// submit form name to given channel
+				log("Info", "sending to submit channel")
+				// indicating desire to Collect()
+				submit <- f.Name
+				// run normal exit procedure
+				f.focus.hideCursor()
+				close(interrupt)
+				die <- 0
+				close(die)
+				return
 			case tcell.KeyEscape:
 				// means we're exiting form focus
 				f.focus.hideCursor()
