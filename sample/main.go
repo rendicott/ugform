@@ -55,10 +55,30 @@ func setLogger(daemonFlag bool, logFileS, loglevel string) {
 	}
 }
 
+func submitWatcher(submissions chan string) {
+	for {
+		select {
+			case s := <-submissions:
+				loggo.Info("caught submission, use Collect() on", 
+					"formName", s)
+				switch s {
+				case "SampleForm":
+					loggo.Info("sampleForm", "contents", sampleForm.Collect())
+				case "CustomForm":
+					loggo.Info("customForm", "contents", customForm.Collect())
+				}
+		}
+	}
+}
+
+// so we can easily reference them in submission goroutine
+var sampleForm *ugform.Form
+var customForm *ugform.Form
 
 
 func main() {
-	setLogger(true, "main.ugform.log.json", "info")
+	//setLogger(true, "main.ugform.log.json", "info")
+	setLogger(true, "main.ugform.log.json", "debug")
 	// log15 logger can be passed to ugform package 
 	// otherwise all package logs are discarded
 	ugform.Loggo = loggo
@@ -67,6 +87,7 @@ func main() {
 	s, err := tcell.NewScreen()
 	// make a quit channel for the main polling function
 	quit := make(chan struct{})
+	submit := make(chan string)
 	if err != nil {
 		log.Fatalf("%+v", err)
 	}
@@ -76,7 +97,7 @@ func main() {
 	s.SetStyle(tcell.StyleDefault)
 
 	// create a new form 
-	sampleForm := ugform.NewForm(s)
+	sampleForm = ugform.NewForm(s)
 	sampleForm.Name = "SampleForm"
 	// add content to the form, there's a handy func for this for demo
 	err = ugform.AddSampleTextBoxes(sampleForm)
@@ -84,12 +105,12 @@ func main() {
 		log.Fatalf("%+v", err)
 	}
 	// now show how to create custom forms
-	customForm := ugform.NewForm(s)
+	customForm = ugform.NewForm(s)
 	customForm.Name = "CustomForm"
 	err = customForm.AddTextBox(
 		&ugform.AddTextBoxInput{
-			Name: "spaces are supported",
-			Description: "All inputs are returned as strings",
+			Name: "password",
+			Description: "Password: ",
 			PositionX: 45,
 			PositionY: 20,
 			Width: 100,
@@ -99,6 +120,7 @@ func main() {
 			StyleText: ugform.StyleHelper("red", "green"),
 			StyleDescription: ugform.StyleHelper("orange", "gray"),
 			ShowDescription: true,
+			Password: true,
 		},
 	)
 	if err != nil {
@@ -115,6 +137,8 @@ func main() {
 	// of the form's blocking PollEvent
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// start a submission watcher so submissions don't block
+	go submitWatcher(submit)
 	// start a main even poller 
 	go func() {
 		for {
@@ -131,7 +155,7 @@ func main() {
 							// the form with the interrupt
 							// channel you want to wait for
 							formInterrupt := make(chan struct{})
-							go sampleForm.Poll(ctx, formInterrupt)
+							go sampleForm.Poll(ctx, formInterrupt, submit)
 							loggo.Info("pausing main poll")
 
 							// if you want you can wrestle
@@ -151,7 +175,7 @@ func main() {
 						// a different form
 						case csr("k"):
 							formInterrupt := make(chan struct{})
-							go customForm.Poll(ctx, formInterrupt)
+							go customForm.Poll(ctx, formInterrupt, submit)
 							<-formInterrupt
 						// have a keystroke that moves the form
 						// around

@@ -87,6 +87,7 @@ type textBox struct {
 	cs, ts, fs, ds    tcell.Style  // cursor, text, fill, and description style
 	s                 tcell.Screen // need direct access to screen
 	showDescription   bool
+	mask              bool // if password box then mask while typing
 }
 
 // remove handles the removal of a rune from the content
@@ -172,7 +173,13 @@ func (t *textBox) drawText() {
 			break
 		}
 		if len(t.con) > pos {
-			t.s.SetContent(i, t.py, t.con[pos], nil, t.ts)
+			var char rune
+			if t.mask {
+				char = csr("*")
+			} else {
+				char = t.con[pos]
+			}
+			t.s.SetContent(i, t.py, char, nil, t.ts)
 		}
 	}
 	// make sure to set cursor now that it's cleard out
@@ -229,6 +236,7 @@ func (f *Form) AddTextBox(in *AddTextBoxInput) (err error) {
 	t.fs = in.StyleFill
 	t.ts = in.StyleText
 	t.ds = in.StyleDescription
+	t.mask = in.Password
 	t.showDescription = in.ShowDescription
 	f.textBoxes[t.name] = &t
 	if in.HasFocus {
@@ -302,6 +310,10 @@ type AddTextBoxInput struct {
 	// first one with focus. If no focus is specified then one
 	// will be selected at random.
 	HasFocus bool
+
+	// Indicates whether or not this textbox is a password
+	// field which will mask it's contents while typing.
+	Password bool
 }
 
 // Form contains properties and methods for interacting with its
@@ -309,25 +321,39 @@ type AddTextBoxInput struct {
 type Form struct {
 	// Optional: name for this form. Useful for managing
 	// lists of forms for example.
-	Name      string
-	textBoxes map[string]*textBox
-	tabOrder  map[int]string
-	focus     *textBox // the textbox that has focus
-	interrupt chan struct{}
-	s         tcell.Screen
+	Name         string
+	SubmitAction interface{}
+	textBoxes    map[string]*textBox
+	tabOrder     map[int]string
+	focus        *textBox // the textbox that has focus
+	interrupt    chan struct{}
+	s            tcell.Screen
 }
 
 // Start activates all of the form's components and renders
-// to the provided screen
+// to the provided screen. If no focus is specified then focus
+// is randomly selected.
 func (f *Form) Start() (err error) {
 	if len(f.textBoxes) == 0 {
 		err = errors.New("no textboxes in form cannot start")
 		return err
 	}
 	if f.focus == nil {
-		// grab random focus
-		for _, tb := range f.textBoxes {
-			f.focus = tb
+		// since maps are unordered we have to build an ordered index
+		var keys []int
+		for k, _ := range f.tabOrder {
+			keys = append(keys, k)
+		}
+		sort.Ints(keys)
+		if len(keys) > 0 {
+			log("Debug", "no focus specified so picking lowest taborder")
+			tbNameAtIndex := f.tabOrder[keys[0]]
+			f.focus = f.textBoxes[tbNameAtIndex]
+		} else {
+			log("Debug", "can't order taborder so picking random focus")
+			for _, tb := range f.textBoxes {
+				f.focus = tb
+			}
 		}
 	}
 	for _, tb := range f.textBoxes {
@@ -341,6 +367,7 @@ func (f *Form) tab(direction string) {
 		log("Debug", "detected non-supported direction", "direction", direction)
 		return
 	}
+	// since maps are unordered we have to build an ordered index
 	var keys []int
 	f.focus.hideCursor()
 	for k, _ := range f.tabOrder {
@@ -448,7 +475,7 @@ func AddSampleTextBoxes(nf *Form) (err error) {
 		StyleText:        StyleHelper("black", "grey"),
 		StyleDescription: StyleHelper("white", "black"),
 		ShowDescription:  true,
-		HasFocus:         true,
+		//HasFocus:         true,
 	})
 	if err != nil {
 		return err

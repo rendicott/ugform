@@ -1,7 +1,7 @@
-version := 0.0.3
+version := 0.0.4
 projectName := ugform
 
-build: format compile release
+build: format compile push
 
 format:
 	go fmt ./...
@@ -9,7 +9,7 @@ format:
 compile:
 	go build ugform.go
 
-release:
+push:
 	git add ugform.go
 	git add README.md
 	git add Makefile
